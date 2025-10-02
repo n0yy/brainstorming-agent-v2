@@ -1,13 +1,12 @@
 from langgraph.prebuilt import create_react_agent
 from langchain_tavily import TavilySearch
-from langgraph.utils.config import get_store
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.store.postgres import PostgresStore
 from langmem import create_manage_memory_tool, create_search_memory_tool
 
 from termcolor import colored
 from src.config.settings import llm, embedding
-from src.tools.prd import generate_prd
+from src.tools.prd import generate_prd, update_prd 
 
 from dotenv import load_dotenv
 import os
@@ -24,13 +23,13 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 tools = [
     tavily_search_tool,      
     generate_prd,
+    update_prd
 ]
 
 def main():    
-
     config = {
         "configurable": {
-            "thread_id": "1000",
+            "thread_id": "df6f1baf-c11f-41f6-a676-85513069f622",
             "user_id": "1",
         }
     }
@@ -45,15 +44,6 @@ def main():
                  "embed": embed_texts,
              }
          ) as store:
-        
-        # Setup
-        # try:
-        #     checkpointer.setup()
-        #     store.setup()
-        # except Exception as e:
-        #     print(colored(f"Error during setup: {e}", "red", attrs=["bold"]))
-        #     return
-
         # Create the memory tool now that store is available
         memory_tool = [
             create_manage_memory_tool(
@@ -73,12 +63,11 @@ def main():
             create_search_memory_tool(namespace=("memories", "{user_id}"))
         ]
         tools.extend(memory_tool)
-        
         agent = create_react_agent(
             model=llm,
             tools=tools,
             store=store,
-            prompt="You are a helpful assistant. when use generate_prd tool you must summary that PRD.",
+            prompt="You are a helpful assistant. When generating PRD, always note the returned UUID ID for future updates. For update_prd, use the exact UUID from previous generate_prd output (e.g., prd_id: 'df6f1baf-c11f-41f6-a676-85513069f622'). Summarize changes clearly.",
             checkpointer=checkpointer
         )
 

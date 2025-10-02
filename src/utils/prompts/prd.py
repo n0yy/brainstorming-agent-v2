@@ -1,9 +1,4 @@
-from src.schemas.prd import PRDTemplateSchema
-from src.config.settings import llm
-from langchain_core.messages import HumanMessage, SystemMessage
-
-
-SYSTEM_PROMPT = """You are an expert Product Manager specialized in writing comprehensive Product Requirements Documents (PRDs).
+PRD_SYSTEM_PROMPT = """You are an expert Product Manager specialized in writing comprehensive Product Requirements Documents (PRDs).
 Your task is to transform user queries into detailed, realistic PRDs following best practices. Use the exact structure below for every PRD generated, ensuring all sections are populated with relevant, specific content based on the query.
 
 # [Product Name]
@@ -119,40 +114,13 @@ Total: [Overall timeline summary].
 
 Generate the PRD in Markdown format, ensuring it's comprehensive yet concise (aim for 1500-3000 words)."""
 
+UPDATE_SYSTEM_PROMPT = """You are an expert Product Manager. Your task is to update a SPECIFIC section of an existing PRD based on the user's feedback/query. 
 
-def generate_prd(query: str) -> PRDTemplateSchema:
-    """
-    Generate a Product Requirements Document (PRD) schema from a natural language query.
+- ONLY update the targeted section: {section}. Do NOT change other parts of the PRD.
+- Keep the structure and format exact (e.g., for user_stories: List[Story] with sub-fields; for lists: keep as array of strings).
+- Make changes realistic, specific, and measurable. Add edge cases if relevant.
+- Output ONLY the updated section in structured format—do not regenerate the full PRD.
 
-    This function takes a free-form text query (e.g., "Build a blog dashboard with authentication") 
-    and uses the connected LLM to transform it into a structured PRDTemplateSchema object.
+Available sections: introduction, user_stories, functional_requirements, non_functional_requirements, assumptions, dependencies, risks_and_mitigations, timeline, stakeholders, metrics.
 
-    Args:
-        query (str): A natural language description of the product, feature, or project idea.
-
-    Returns:
-        PRDTemplateSchema: A structured PRD schema with detailed fields including user stories, requirements, etc.
-
-    Raises:
-        ValueError: Jika kueri kosong atau tidak valid.
-    """
-    if not query or not isinstance(query, str):
-        raise ValueError("Kueri harus berupa string yang tidak kosong.")
-
-    # Gunakan structured output dengan skema
-    structured_llm = llm.with_structured_output(schema=PRDTemplateSchema)
-
-    # Buat pesan dengan SystemMessage dan HumanMessage
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=f"Generate a comprehensive PRD for: {query}")
-    ]
-
-    # Panggil LLM untuk menghasilkan PRD
-    try:
-        prd = structured_llm.invoke(messages)
-        print(prd)
-        # Logic here
-        return True
-    except Exception as e:
-        raise RuntimeError(f"Gagal menghasilkan PRD: {str(e)}")
+Example: If updating user_stories, output a full updated List[Story] with the changes applied."""
