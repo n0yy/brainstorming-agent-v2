@@ -26,10 +26,13 @@ tools = [
     update_prd
 ]
 
-def main():    
+def main():
+    # Thread ID yang akan digunakan sebagai PRD ID
+    thread_id = "df6f1baf-c11f-41f6-a676-85513069f622"
+    
     config = {
         "configurable": {
-            "thread_id": "df6f1baf-c11f-41f6-a676-85513069f622",
+            "thread_id": thread_id,
             "user_id": "1",
         }
     }
@@ -44,32 +47,49 @@ def main():
                  "embed": embed_texts,
              }
          ) as store:
-        # Create the memory tool now that store is available
+        # Create the memory tool
         memory_tool = [
             create_manage_memory_tool(
                 namespace=("memories", "{user_id}"),
                 instructions=(
                     "Proactively call this tool when "
-                    "1. Identify a new USER preference"
-                    "2. Receive an explicit USER request"
-                    "3. Are working and want to record"
-                    "4. Identify that an existing MEMORY"
-                    "5. Want to recall a specific MEMORY"
-                    "6. Want to forget a specific MEMORY"
-                    "7. Want to update a specific MEMORY"
+                    "1. Identify a new USER preference "
+                    "2. Receive an explicit USER request "
+                    "3. Are working and want to record "
+                    "4. Identify that an existing MEMORY "
+                    "5. Want to recall a specific MEMORY "
+                    "6. Want to forget a specific MEMORY "
+                    "7. Want to update a specific MEMORY "
                     "8. the user activity"
                 )
             ),
             create_search_memory_tool(namespace=("memories", "{user_id}"))
         ]
         tools.extend(memory_tool)
+        
+        # Agent with explicit instructions about thread_id as prd_id
         agent = create_react_agent(
             model=llm,
             tools=tools,
             store=store,
-            prompt="You are a helpful assistant. When generating PRD, always note the returned UUID ID for future updates. For update_prd, use the exact UUID from previous generate_prd output (e.g., prd_id: 'df6f1baf-c11f-41f6-a676-85513069f622'). Summarize changes clearly.",
+            prompt=f"""You are a helpful Product Manager assistant.
+
+IMPORTANT PRD ID RULES:
+- The current thread_id is: {thread_id}
+- When generating a NEW PRD with generate_prd, ALWAYS use thread_id as the prd_id parameter
+- When updating an existing PRD with update_prd, ALWAYS use thread_id as the prd_id parameter
+- This ensures PRDs are tied to conversations and can be easily retrieved
+
+Example calls:
+- generate_prd(feature="...", prd_id="{thread_id}", ...)
+- update_prd(feedback="...", prd_id="{thread_id}", section="...")
+
+Always summarize changes clearly after PRD operations.""",
             checkpointer=checkpointer
         )
+
+        print(colored(f"🚀 Agent started with thread_id: {thread_id}", "green", attrs=["bold"]))
+        print(colored("   All PRDs will use this thread_id as prd_id\n", "green"))
 
         while True:
             query = input(colored("You: ", "cyan", attrs=["bold"]))
@@ -78,7 +98,6 @@ def main():
                 break
 
             print(colored("\n" + "─" * 60, "yellow"))
-            
             
             for chunk in agent.stream(
                 {"messages": [{"role": "user", "content": query}]},
