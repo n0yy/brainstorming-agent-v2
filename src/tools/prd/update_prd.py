@@ -1,26 +1,24 @@
 import asyncio
+import json
 from typing import Any
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, create_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
 from src.schemas.prd import PRDTemplateSchema
 from src.config.settings import llm
-from src.utils.supabase.save_prd import save_prd_tx
 from src.utils.supabase.client import supabase
 
-UPDATE_SYSTEM_PROMPT = """You are an expert Product Manager updating an existing PRD based on user feedback.
+UPDATE_SYSTEM_PROMPT = """You are an expert Product Manager updating an existing PRD section based on user feedback.
 
 CRITICAL RULES:
-1. You will receive the COMPLETE existing PRD data
-2. ONLY modify the '{section}' section based on feedback
-3. Keep ALL other sections EXACTLY as provided - do not change, omit, or regenerate them
-4. Output the FULL PRD with all sections (modified + unchanged)
-5. Maintain exact structure: List[Story] for user_stories, List[str] for requirements, etc.
+1. You will receive ONLY the existing content for the '{section}' section
+2. Update ONLY the '{section}' section based on feedback
+3. Return STRICTLY a JSON object with a single key '{section}' and the updated value of the correct type
+4. Do NOT include any other sections in the output
+5. Maintain exact structure: for example, List[Story] for user_stories, List[str] for requirements, plain string for timeline, etc.
 
-Make changes realistic, specific, and measurable. Add edge cases if relevant.
-
-Available sections: introduction, user_stories, functional_requirements, non_functional_requirements, assumptions, dependencies, risks_and_mitigations, timeline, stakeholders, metrics."""
+Make changes realistic, specific, and measurable. Add edge cases if relevant."""
 
 class UpdatePRDInput(BaseModel):
     """Input schema for updating a PRD section."""
@@ -50,59 +48,70 @@ async def update_prd_async(**kwargs: Any) -> str:
     if not feedback or not prd_id or not section:
         raise ValueError("Feedback, PRD ID, and section are required.")
 
-    # Fetch existing PRD from database
+    # Validate section exists in schema
+    if section not in PRDTemplateSchema.model_fields:
+        raise ValueError(f"Unknown section '{section}'. Must be one of: {', '.join(PRDTemplateSchema.model_fields.keys())}")
+
     try:
-        existing_data = supabase.table("prds").select("*").eq("id", prd_id).single().execute()
+        select_cols = f"{section},version"
+        existing_data = await asyncio.to_thread(
+            lambda: supabase.table("prds").select(select_cols).eq("id", prd_id).single().execute()
+        )
         if not existing_data.data:
             raise ValueError(f"PRD with ID {prd_id} not found in database")
     except Exception as e:
         raise ValueError(f"Failed to fetch PRD {prd_id}: {str(e)}")
-    
-    existing_prd_dict = existing_data.data
-    
-    # Convert to Pydantic schema
-    try:
-        existing_prd = PRDTemplateSchema(**existing_prd_dict)
-    except Exception as e:
-        raise ValueError(f"Invalid PRD data structure: {str(e)}")
-    
-    # Calculate old length for diff
-    old_section_data = getattr(existing_prd, section, None)
-    old_section_len = len(old_section_data) if isinstance(old_section_data, list) else 0
-    
-    # Structured LLM for section update
-    structured_llm = llm.with_structured_output(schema=PRDTemplateSchema)
-    
+
+    existing_section_value = existing_data.data.get(section)
+    existing_version = existing_data.data.get("version", 0) or 0
+
+    # Determine field type for the requested section
+    field_info = PRDTemplateSchema.model_fields[section]
+    field_type = field_info.annotation
+
+    # Build dynamic Pydantic model for structured output { section: field_type }
+    SectionModel = create_model("SectionUpdate", **{section: (field_type, ...)})
+    structured_llm = llm.with_structured_output(schema=SectionModel)
+
+    # Prepare concise messages focusing only on the target section
+    pretty_existing = (
+        json.dumps(existing_section_value, ensure_ascii=False) if isinstance(existing_section_value, (dict, list)) else str(existing_section_value)
+    )
+    human_content = (
+        f"EXISTING SECTION '{section}':\n{pretty_existing}\n\n"
+        f"USER FEEDBACK: {feedback}\n\n"
+        f"Return strictly JSON with key '{section}' containing the updated value."
+    )
     messages = [
         SystemMessage(content=UPDATE_SYSTEM_PROMPT.format(section=section)),
-        HumanMessage(content=f"""EXISTING PRD (keep all sections unchanged except '{section}'):
-{existing_prd.model_dump_json(indent=2, exclude_none=True)}
-
-USER FEEDBACK: {feedback}
-
-Output the complete PRD with only '{section}' updated based on feedback. All other sections must remain identical.""")
+        HumanMessage(content=human_content),
     ]
 
     try:
-        # Generate updated PRD
-        updated_prd = await structured_llm.ainvoke(messages)
-        
-        # Save with version bump (pass prd_id to update existing record)
-        saved_id = await save_prd_tx(updated_prd, prd_id)
-        
-        # Calculate diff
-        new_section_data = getattr(updated_prd, section, None)
-        new_section_len = len(new_section_data) if isinstance(new_section_data, list) else 0
-        diff = new_section_len - old_section_len
-        
+        # Generate updated section only
+        section_result = await structured_llm.ainvoke(messages)
+        updated_section = section_result.model_dump().get(section)
+
+        # Calculate simple diff summary for list-type sections
+        old_len = len(existing_section_value) if isinstance(existing_section_value, list) else None
+        new_len = len(updated_section) if isinstance(updated_section, list) else None
         changes_summary = f"Updated '{section}'"
-        if diff != 0:
-            changes_summary += f" ({diff:+d} items)"
-        
-        prd_json = updated_prd.model_dump_json(indent=2, exclude_none=True)
-        new_version = existing_prd_dict.get('version', 1) + 1
-        
-        return f"✅ {changes_summary}\n📄 PRD ID: {saved_id}\n🔢 Version: {new_version}\n\nFull updated PRD:\n{prd_json}"
+        if old_len is not None and new_len is not None:
+            diff = new_len - old_len
+            if diff != 0:
+                changes_summary += f" ({diff:+d} items)"
+
+        # Persist only the updated section and bump version (non-blocking)
+        new_version = existing_version + 1
+        await asyncio.to_thread(
+            lambda: supabase
+            .table("prds")
+            .update({section: updated_section, "version": new_version})
+            .eq("id", prd_id)
+            .execute()
+        )
+
+        return f"✅ {changes_summary}\n📄 PRD ID: {prd_id}\n🔢 Version: {new_version}"
     except Exception as e:
         raise RuntimeError(f"Failed to update PRD: {str(e)}")
 
