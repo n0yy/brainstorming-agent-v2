@@ -1,112 +1,19 @@
-from langgraph.prebuilt import create_react_agent
-from langchain_tavily import TavilySearch
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.store.postgres import PostgresStore
-from langmem import create_manage_memory_tool, create_search_memory_tool
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from src.routes.chat import router
+import uvicorn
 
-from termcolor import colored
-from src.config.settings import llm, embedding
-from src.tools.prd import generate_prd, update_prd 
+app = FastAPI()
 
-from dotenv import load_dotenv
-import os
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-load_dotenv()
-
-# DEFINE THE TOOLS
-tavily_search_tool = TavilySearch(max_results=3)
-
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    response = embedding.embed_documents(texts)
-    return response
-
-tools = [
-    tavily_search_tool,      
-    generate_prd,
-    update_prd
-]
-
-def main():
-    # Thread ID yang akan digunakan sebagai PRD ID
-    thread_id = "df6f1baf-c11f-41f6-a676-85513069f622"
-    
-    config = {
-        "configurable": {
-            "thread_id": thread_id,
-            "user_id": "1",
-        }
-    }
-
-    DB_URI = os.getenv("DB_URI")
-    
-    with PostgresSaver.from_conn_string(DB_URI) as checkpointer, \
-         PostgresStore.from_conn_string(
-             DB_URI,
-             index={
-                 "dims": 1536,
-                 "embed": embed_texts,
-             }
-         ) as store:
-        # Create the memory tool
-        memory_tool = [
-            create_manage_memory_tool(
-                namespace=("memories", "{user_id}"),
-                instructions=(
-                    "Proactively call this tool when "
-                    "1. Identify a new USER preference "
-                    "2. Receive an explicit USER request "
-                    "3. Are working and want to record "
-                    "4. Identify that an existing MEMORY "
-                    "5. Want to recall a specific MEMORY "
-                    "6. Want to forget a specific MEMORY "
-                    "7. Want to update a specific MEMORY "
-                    "8. the user activity"
-                )
-            ),
-            create_search_memory_tool(namespace=("memories", "{user_id}"))
-        ]
-        tools.extend(memory_tool)
-        
-        # Agent with explicit instructions about thread_id as prd_id
-        agent = create_react_agent(
-            model=llm,
-            tools=tools,
-            store=store,
-            prompt=f"""You are a helpful Product Manager assistant.
-
-IMPORTANT PRD ID RULES:
-- The current thread_id is: {thread_id}
-- When generating a NEW PRD with generate_prd, ALWAYS use thread_id as the prd_id parameter
-- When updating an existing PRD with update_prd, ALWAYS use thread_id as the prd_id parameter
-- This ensures PRDs are tied to conversations and can be easily retrieved
-
-Example calls:
-- generate_prd(feature="...", prd_id="{thread_id}", ...)
-- update_prd(feedback="...", prd_id="{thread_id}", section="...")
-
-Always summarize changes clearly after PRD operations.""",
-            checkpointer=checkpointer
-        )
-
-        print(colored(f"🚀 Agent started with thread_id: {thread_id}", "green", attrs=["bold"]))
-        print(colored("   All PRDs will use this thread_id as prd_id\n", "green"))
-
-        while True:
-            query = input(colored("You: ", "cyan", attrs=["bold"]))
-            if query.lower() == "q":
-                print(colored("\n👋 Bye!", "red", attrs=["bold"]))
-                break
-
-            print(colored("\n" + "─" * 60, "yellow"))
-            
-            for chunk in agent.stream(
-                {"messages": [{"role": "user", "content": query}]},
-                stream_mode="values",
-                config=config,
-            ):
-                chunk["messages"][-1].pretty_print()
-
-            print(colored("\n" + "─" * 60 + "\n", "yellow"))
+app.include_router(router)
 
 if __name__ == "__main__":
-    main()
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -8,7 +8,8 @@ load_dotenv()
 llm = ChatOpenAI(
     api_key=os.getenv("LITELLM_API_KEY"),
     base_url=os.getenv("LITELLM_BASE_URL"),
-    model="openrouter/openai/gpt-4o"
+    model="openrouter/openai/gpt-4o",
+    streaming=True
 )
 
 embedding = OpenAIEmbeddings(

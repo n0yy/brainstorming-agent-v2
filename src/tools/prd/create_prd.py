@@ -63,15 +63,10 @@ async def generate_prd_async(**kwargs: Any) -> str:
         # Save to database (pass prd_id if provided)
         saved_id = await save_prd_tx(new_prd, prd_id)
         
-        prd_json = new_prd.model_dump_json(indent=2, exclude_none=True)
-        
         return f"""✅ PRD generated successfully!
 📄 PRD ID: {saved_id}
 🔢 Version: 1
 🎯 Feature: {feature}
-
-Full PRD:
-{prd_json}
 
 💡 Use this PRD ID ({saved_id}) for future updates with update_prd tool."""
     except Exception as e:

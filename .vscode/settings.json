@@ -1,0 +1,36 @@
+{
+  // Menyembunyikan file/folder yang tidak perlu di Explorer
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.py[cod]": true,
+    "**/*.pyo": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.venv": true,
+    "**/venv": true,
+    "**/.ipynb_checkpoints": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "**/.idea": true,
+    "**/.vscode": false
+  },
+
+  "search.exclude": {
+    "**/__pycache__": true,
+    "**/*.py[cod]": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.venv": true,
+    "**/venv": true,
+    "**/.ipynb_checkpoints": true,
+    "**/node_modules": true
+  },
+
+  "files.watcherExclude": {
+    "**/__pycache__/**": true,
+    "**/node_modules/**": true
+  },
+
+  "explorer.compactFolders": false,
+  "explorer.openEditors.visible": 1
+}
