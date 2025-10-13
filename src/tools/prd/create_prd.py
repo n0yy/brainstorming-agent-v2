@@ -4,35 +4,24 @@ from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
-from src.schemas.prd import PRDTemplateSchema
 from src.config.settings import llm
 from src.utils.supabase.save_prd import save_prd_tx
+from src.utils.prompts.prd import PRD_SYSTEM_PROMPT 
 
-GENERATE_SYSTEM_PROMPT = """You are an expert Product Manager. Generate a comprehensive Product Requirements Document (PRD) based on the user's feature request.
-
-Requirements:
-- Be specific, measurable, and realistic
-- Include edge cases and error handling in requirements
-- User stories should follow format: "As a [user], I want [goal] so that [benefit]"
-- Functional requirements should be clear, testable actions
-- Non-functional requirements: performance, security, scalability, etc.
-- Timeline should be realistic with milestones
-- Identify all stakeholders (users, devs, QA, legal, etc.)
-- Metrics should be SMART (Specific, Measurable, Achievable, Relevant, Time-bound)
-
-Output a complete, structured PRD ready for development."""
+from uuid import UUID
 
 class GeneratePRDInput(BaseModel):
     """Input schema for generating a PRD."""
     feature: str = Field(..., description="Feature name or description to generate PRD for")
-    prd_id: Optional[str] = Field(default=None, description="Optional PRD ID (use thread_id to link to conversation)")
+    user_id: str = Field(..., description="Supabase user ID for ownership of the PRD")
+    prd_id: Optional[str] = Field(default=None, description="Optional existing PRD ID (UUID) when regenerating")
 
 async def generate_prd_async(**kwargs: Any) -> str:
     """
     Generate a new PRD based on feature description.
     
     Args:
-        **kwargs: feature (str, required), prd_id (str, optional).
+        **kwargs: feature (str, required), user_id (str, required), prd_id (str, optional).
     
     Returns:
         str: Generated PRD JSON with ID and version info.
@@ -43,32 +32,44 @@ async def generate_prd_async(**kwargs: Any) -> str:
         raise ValueError(f"Invalid input: {e}. Need 'feature' parameter.")
 
     feature = input_data.feature
+    user_id = input_data.user_id
     prd_id = input_data.prd_id
 
     if not feature:
         raise ValueError("Feature description is required.")
+    if not user_id:
+        raise ValueError("user_id is required.")
 
-    # Structured LLM for PRD generation
-    structured_llm = llm.with_structured_output(schema=PRDTemplateSchema)
-    
+    # Validate PRD ID format if provided
+    if prd_id:
+        try:
+            UUID(prd_id)
+        except (ValueError, TypeError):
+            raise ValueError("prd_id must be a valid UUID string if provided.")
+
     messages = [
-        SystemMessage(content=GENERATE_SYSTEM_PROMPT),
-        HumanMessage(content=f"Feature request: {feature}\n\nGenerate a complete PRD for this feature.")
+        SystemMessage(content=PRD_SYSTEM_PROMPT),
+        HumanMessage(
+            content=(
+                "Use the provided schema to create a PRD. "
+                "Populate every required property with realistic, specific details. "
+                "Feature request: "
+                f"{feature}"
+            )
+        )
     ]
 
     try:
         # Generate new PRD
-        new_prd = await structured_llm.ainvoke(messages)
-        
+        new_prd = await llm.ainvoke(messages)
+
         # Save to database (pass prd_id if provided)
-        saved_id = await save_prd_tx(new_prd, prd_id)
+        await save_prd_tx(new_prd, user_id=user_id, feature_name=feature, prd_id=prd_id)
         
         return f"""✅ PRD generated successfully!
-📄 PRD ID: {saved_id}
 🔢 Version: 1
 🎯 Feature: {feature}
-
-💡 Use this PRD ID ({saved_id}) for future updates with update_prd tool."""
+💡 PRD: {new_prd}"""
     except Exception as e:
         raise RuntimeError(f"Failed to generate PRD: {str(e)}")
 
@@ -82,7 +83,7 @@ generate_prd = StructuredTool.from_function(
     name="generate_prd",
     description=(
         "Generate a new Product Requirements Document (PRD) based on feature description. "
-        "Parameters: feature (str, required), prd_id (str, optional - use thread_id to link to conversation). "
+        "Parameters: feature (str, required), user_id (str, required), prd_id (str, optional existing PRD UUID). "
         "Returns generated PRD with ID for future updates."
     ),
     args_schema=GeneratePRDInput,

@@ -1,11 +1,10 @@
 import asyncio
 import json
-from typing import Any
+from typing import Any, Optional, Type
 from pydantic import BaseModel, Field, ValidationError, create_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
-from src.schemas.prd import PRDTemplateSchema
 from src.config.settings import llm
 from src.utils.supabase.client import supabase
 
@@ -25,6 +24,41 @@ class UpdatePRDInput(BaseModel):
     feedback: str = Field(..., description="Natural language feedback/query for the update (e.g., 'Add offline support')")
     prd_id: str = Field(..., description="Existing PRD ID from Supabase (or thread_id)")
     section: str = Field(..., description="Target section to update (e.g., 'user_stories', 'stakeholders')")
+
+LIST_SECTION_HINTS = {
+    "user_stories",
+    "functional_requirements",
+    "non_functional_requirements",
+    "assumptions",
+    "dependencies",
+    "risks_and_mitigations",
+    "timeline",
+    "stakeholders",
+    "metrics",
+}
+
+
+def _deserialize_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _serialize_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
 
 async def update_prd_async(**kwargs: Any) -> str:
     """
@@ -48,10 +82,6 @@ async def update_prd_async(**kwargs: Any) -> str:
     if not feedback or not prd_id or not section:
         raise ValueError("Feedback, PRD ID, and section are required.")
 
-    # Validate section exists in schema
-    if section not in PRDTemplateSchema.model_fields:
-        raise ValueError(f"Unknown section '{section}'. Must be one of: {', '.join(PRDTemplateSchema.model_fields.keys())}")
-
     try:
         select_cols = f"{section},version"
         existing_data = await asyncio.to_thread(
@@ -62,12 +92,18 @@ async def update_prd_async(**kwargs: Any) -> str:
     except Exception as e:
         raise ValueError(f"Failed to fetch PRD {prd_id}: {str(e)}")
 
-    existing_section_value = existing_data.data.get(section)
+    existing_section_value = _deserialize_value(existing_data.data.get(section))
     existing_version = existing_data.data.get("version", 0) or 0
 
     # Determine field type for the requested section
-    field_info = PRDTemplateSchema.model_fields[section]
-    field_type = field_info.annotation
+    if isinstance(existing_section_value, list):
+        field_type: Type[Any] = list
+    elif isinstance(existing_section_value, dict):
+        field_type = dict
+    elif existing_section_value is None and section in LIST_SECTION_HINTS:
+        field_type = list
+    else:
+        field_type = str
 
     # Build dynamic Pydantic model for structured output { section: field_type }
     SectionModel = create_model("SectionUpdate", **{section: (field_type, ...)})
@@ -75,7 +111,7 @@ async def update_prd_async(**kwargs: Any) -> str:
 
     # Prepare concise messages focusing only on the target section
     pretty_existing = (
-        json.dumps(existing_section_value, ensure_ascii=False) if isinstance(existing_section_value, (dict, list)) else str(existing_section_value)
+        json.dumps(existing_section_value, ensure_ascii=False) if isinstance(existing_section_value, (dict, list)) else str(existing_section_value or "")
     )
     human_content = (
         f"EXISTING SECTION '{section}':\n{pretty_existing}\n\n"
@@ -103,10 +139,11 @@ async def update_prd_async(**kwargs: Any) -> str:
 
         # Persist only the updated section and bump version (non-blocking)
         new_version = existing_version + 1
+        serialized_section = _serialize_value(updated_section)
         await asyncio.to_thread(
             lambda: supabase
             .table("prds")
-            .update({section: updated_section, "version": new_version})
+            .update({section: serialized_section, "version": new_version})
             .eq("id", prd_id)
             .execute()
         )

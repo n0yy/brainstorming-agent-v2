@@ -83,36 +83,35 @@ async def chat(thread_id: str, payload: ChatPayload):
         memory_tools = [
             create_manage_memory_tool(
                 namespace=("memories", "{user_id}"),
-                instructions=(
-                    "Proactively call this tool when "
-                    "1. Identify a new USER preference "
-                    "2. Receive an explicit USER request "
-                    "3. Are working and want to record progress "
-                    "4. Identify that an existing MEMORY needs update "
-                    "5. Want to recall a specific MEMORY "
-                    "6. Want to forget a specific MEMORY "
-                    "7. Want to update a specific MEMORY "
-                    "8. User activity needs tracking"
-                )
             ),
             create_search_memory_tool(namespace=("memories", "{user_id}"))
         ]
+
+        all_tools = [tavily_search_tool, generate_prd, update_prd]
+        all_tools.extend(memory_tools)
+        # Create agent with Simpli persona
+        system_prompt = f"""You are Simpli, PM assistant. Thread: {thread_id}
+
+CRITICAL - CHECK MEMORY FIRST:
+When user asks about themselves:
+1. ALWAYS use search_memory tool first
+2. NEVER use web search for this
+3. If no memory found, tell user honestly
+
+SAVE TO MEMORY:
+- User preferences, work context, goals
+- Save naturally without asking permission
+
+OTHER TOOLS:
+- TavilySearch: for current events/research (NOT for user info)
+- generate_prd/update_prd: when explicitly requested
+- PRD operations use prd_id="{thread_id}", user_id="{payload.user_id}"
+
+Respond in user's language. Be helpful and natural."""
         
-        all_tools = [tavily_search_tool, generate_prd, update_prd] + memory_tools
-        
-        # Create agent
-        system_prompt = f"""You are a helpful Product Manager assistant.
-
-IMPORTANT PRD ID RULES:
-- Current thread_id: {thread_id}
-- When generating NEW PRD: use generate_prd(prd_id="{thread_id}", ...)
-- When updating PRD: use update_prd(prd_id="{thread_id}", ...)
-
-Always summarize changes after PRD operations."""
-
         agent = create_react_agent(
-            llm,
-            all_tools,
+            model=llm,
+            tools=all_tools,
             checkpointer=checkpointer,
             store=store,
             prompt=system_prompt
