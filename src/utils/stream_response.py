@@ -1,6 +1,13 @@
 import json
 from typing import AsyncGenerator, Any
 
+from src.utils.request_context import (
+    reset_thread_id,
+    reset_user_id,
+    set_thread_id,
+    set_user_id,
+)
+
 
 def _chunk_to_text(chunk: Any) -> str:
     content = getattr(chunk, "content", None)
@@ -42,6 +49,10 @@ async def stream_response(agent, query: str, config) -> AsyncGenerator[str, None
     Stream response dengan format SSE yang terstruktur.
     Frontend bisa membedakan tipe event: tool_start, tool_end, message, error.
     """
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    thread_token = set_thread_id(configurable.get("thread_id"))
+    user_token = set_user_id(configurable.get("user_id"))
+
     try:
         async for event in agent.astream_events(
             {"messages": [{"role": "user", "content": query}]},
@@ -80,3 +91,6 @@ async def stream_response(agent, query: str, config) -> AsyncGenerator[str, None
 
     except Exception as exc:
         yield _sse({"type": "error", "message": repr(exc)})
+    finally:
+        reset_thread_id(thread_token)
+        reset_user_id(user_token)

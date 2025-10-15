@@ -7,6 +7,7 @@ from langchain_core.tools import StructuredTool
 
 from src.config.settings import llm
 from src.utils.supabase.client import supabase
+from src.utils.request_context import get_thread_id
 
 UPDATE_SYSTEM_PROMPT = """You are an expert Product Manager updating an existing PRD section based on user feedback.
 
@@ -22,20 +23,40 @@ Make changes realistic, specific, and measurable. Add edge cases if relevant."""
 class UpdatePRDInput(BaseModel):
     """Input schema for updating a PRD section."""
     feedback: str = Field(..., description="Natural language feedback/query for the update (e.g., 'Add offline support')")
-    prd_id: str = Field(..., description="Existing PRD ID from Supabase (or thread_id)")
+    prd_id: Optional[str] = Field(default=None, description="Existing PRD ID from Supabase (or thread_id)")
     section: str = Field(..., description="Target section to update (e.g., 'user_stories', 'stakeholders')")
 
-LIST_SECTION_HINTS = {
-    "user_stories",
-    "functional_requirements",
-    "non_functional_requirements",
-    "assumptions",
-    "dependencies",
-    "risks_and_mitigations",
-    "timeline",
-    "stakeholders",
-    "metrics",
+SECTION_FIELD_TYPES: dict[str, Type[Any]] = {
+    "user_stories": list[dict[str, Any]],
+    "functional_requirements": list[str],
+    "non_functional_requirements": list[str],
+    "assumptions": list[str],
+    "dependencies": list[str],
+    "risks_and_mitigations": list[dict[str, Any]],
+    "stakeholders": list[str],
+    "metrics": list[str],
+    "timeline": dict[str, Any],
 }
+
+
+def _infer_field_type(section: str, existing_value: Any) -> Type[Any]:
+    mapped = SECTION_FIELD_TYPES.get(section)
+    if isinstance(existing_value, str):
+        return str
+    if isinstance(existing_value, list):
+        first_item = existing_value[0] if existing_value else None
+        if isinstance(first_item, dict):
+            return list[dict[str, Any]]
+        if isinstance(first_item, (int, float, bool, str)):
+            return list[type(first_item)]
+        return list[str]
+    if isinstance(existing_value, dict):
+        return dict[str, Any]
+    if isinstance(existing_value, (int, float, bool)):
+        return type(existing_value)
+    if mapped is not None:
+        return mapped
+    return str
 
 
 def _deserialize_value(value: Any) -> Any:
@@ -73,41 +94,36 @@ async def update_prd_async(**kwargs: Any) -> str:
     try:
         input_data = UpdatePRDInput.model_validate(kwargs)
     except ValidationError as e:
-        raise ValueError(f"Invalid input: {e}. Need 'feedback', 'prd_id', 'section'.")
+        raise ValueError(f"Invalid input: {e}. Need 'feedback' and 'section'.")
 
     feedback = input_data.feedback
-    prd_id = input_data.prd_id
+    prd_id = input_data.prd_id or get_thread_id()
     section = input_data.section
 
-    if not feedback or not prd_id or not section:
-        raise ValueError("Feedback, PRD ID, and section are required.")
+    if not feedback or not section:
+        raise ValueError("Feedback and section are required.")
+    if not prd_id:
+        raise ValueError("PRD ID is required but missing. Make sure to supply thread_id when calling this tool.")
 
+    select_cols = f"{section},version"
     try:
-        select_cols = f"{section},version"
         existing_data = await asyncio.to_thread(
-            lambda: supabase.table("prds").select(select_cols).eq("id", prd_id).single().execute()
+            lambda: supabase.table("prds").select(select_cols).eq("id", prd_id).limit(1).execute()
         )
-        if not existing_data.data:
-            raise ValueError(f"PRD with ID {prd_id} not found in database")
     except Exception as e:
         raise ValueError(f"Failed to fetch PRD {prd_id}: {str(e)}")
 
-    existing_section_value = _deserialize_value(existing_data.data.get(section))
-    existing_version = existing_data.data.get("version", 0) or 0
+    if not existing_data.data:
+        raise ValueError(f"PRD with ID {prd_id} not found in database")
 
-    # Determine field type for the requested section
-    if isinstance(existing_section_value, list):
-        field_type: Type[Any] = list
-    elif isinstance(existing_section_value, dict):
-        field_type = dict
-    elif existing_section_value is None and section in LIST_SECTION_HINTS:
-        field_type = list
-    else:
-        field_type = str
+    existing_row = existing_data.data[0]
+    existing_section_value = _deserialize_value(existing_row.get(section))
+    existing_version = existing_row.get("version", 0) or 0
 
-    # Build dynamic Pydantic model for structured output { section: field_type }
+    field_type: Type[Any] = _infer_field_type(section, existing_section_value)
+
     SectionModel = create_model("SectionUpdate", **{section: (field_type, ...)})
-    structured_llm = llm.with_structured_output(schema=SectionModel)
+    structured_llm = llm.with_structured_output(schema=SectionModel, method="function_calling")
 
     # Prepare concise messages focusing only on the target section
     pretty_existing = (
@@ -162,7 +178,7 @@ update_prd = StructuredTool.from_function(
     name="update_prd",
     description=(
         "Update a specific section of an existing PRD based on feedback. "
-        "Parameters: feedback (str, required), prd_id (str, required - use thread_id), section (str, required, e.g., 'stakeholders'). "
+        "Parameters: feedback (str, required), prd_id (str, optional - defaults to thread_id), section (str, required, e.g., 'stakeholders'). "
         "Returns summary of changes and updated PRD details."
     ),
     args_schema=UpdatePRDInput,

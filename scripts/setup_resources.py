@@ -44,6 +44,21 @@ CREATE INDEX IF NOT EXISTS idx_prds_user_feature_hash ON prds (user_id, md5(feat
 CREATE INDEX IF NOT EXISTS idx_prds_feature_trgm ON prds USING GIN (feature gin_trgm_ops);
 """
 
+# Tambahan: Modifikasi tabel checkpoints untuk menambah kolom user_id
+CHECKPOINTS_USER_ID_SQL = """
+-- Tambah kolom user_id ke checkpoints jika belum ada
+ALTER TABLE checkpoints 
+ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+
+-- Buat index untuk filter by user_id
+CREATE INDEX IF NOT EXISTS idx_checkpoints_user_id 
+ON checkpoints (user_id);
+
+-- Index gabungan untuk query yang sering: filter by user_id + thread_id
+CREATE INDEX IF NOT EXISTS idx_checkpoints_user_thread 
+ON checkpoints (user_id, thread_id);
+"""
+
 SAVE_PRD_FUNCTION_SQL = """
 CREATE OR REPLACE FUNCTION save_prd_tx(
     p_id UUID DEFAULT NULL,
@@ -171,8 +186,12 @@ async def main() -> None:
 
     await setup_prd_schema(db_uri)
 
+    # Setup checkpointer dulu (biar tabel checkpoints dibuat)
     async with AsyncPostgresSaver.from_conn_string(db_uri) as checkpointer:
         await initialize_resource(checkpointer)
+
+    # BARU tambahkan kolom user_id setelah tabel checkpoints ada
+    await run_sql(db_uri, CHECKPOINTS_USER_ID_SQL)
 
     async with AsyncPostgresStore.from_conn_string(
         db_uri,

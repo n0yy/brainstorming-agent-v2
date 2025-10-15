@@ -7,13 +7,14 @@ from langchain_core.tools import StructuredTool
 from src.config.settings import llm
 from src.utils.supabase.save_prd import save_prd_tx
 from src.utils.prompts.prd import PRD_SYSTEM_PROMPT 
+from src.utils.request_context import get_thread_id, get_user_id
 
 from uuid import UUID
 
 class GeneratePRDInput(BaseModel):
     """Input schema for generating a PRD."""
     feature: str = Field(..., description="Feature name or description to generate PRD for")
-    user_id: str = Field(..., description="Supabase user ID for ownership of the PRD")
+    user_id: Optional[str] = Field(default=None, description="Supabase user ID for ownership of the PRD")
     prd_id: Optional[str] = Field(default=None, description="Optional existing PRD ID (UUID) when regenerating")
 
 async def generate_prd_async(**kwargs: Any) -> str:
@@ -21,7 +22,7 @@ async def generate_prd_async(**kwargs: Any) -> str:
     Generate a new PRD based on feature description.
     
     Args:
-        **kwargs: feature (str, required), user_id (str, required), prd_id (str, optional).
+        **kwargs: feature (str, required), user_id (str, optional, falls back to context), prd_id (str, optional, defaults to thread_id).
     
     Returns:
         str: Generated PRD JSON with ID and version info.
@@ -32,8 +33,8 @@ async def generate_prd_async(**kwargs: Any) -> str:
         raise ValueError(f"Invalid input: {e}. Need 'feature' parameter.")
 
     feature = input_data.feature
-    user_id = input_data.user_id
-    prd_id = input_data.prd_id
+    user_id = input_data.user_id or get_user_id()
+    prd_id = input_data.prd_id or get_thread_id()
 
     if not feature:
         raise ValueError("Feature description is required.")
@@ -68,8 +69,7 @@ async def generate_prd_async(**kwargs: Any) -> str:
         
         return f"""✅ PRD generated successfully!
 🔢 Version: 1
-🎯 Feature: {feature}
-💡 PRD: {new_prd}"""
+🎯 Feature: {feature}"""
     except Exception as e:
         raise RuntimeError(f"Failed to generate PRD: {str(e)}")
 
@@ -83,7 +83,7 @@ generate_prd = StructuredTool.from_function(
     name="generate_prd",
     description=(
         "Generate a new Product Requirements Document (PRD) based on feature description. "
-        "Parameters: feature (str, required), user_id (str, required), prd_id (str, optional existing PRD UUID). "
+        "Parameters: feature (str, required), user_id (str, optional - defaults to context user), prd_id (str, optional existing PRD UUID/default thread_id). "
         "Returns generated PRD with ID for future updates."
     ),
     args_schema=GeneratePRDInput,

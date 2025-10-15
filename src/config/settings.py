@@ -8,7 +8,7 @@ load_dotenv()
 llm = ChatOpenAI(
     api_key=os.getenv("LITELLM_API_KEY"),
     base_url=os.getenv("LITELLM_BASE_URL"),
-    model="azure/gpt-4.1",
+    model="azure/gpt-5-mini",
     streaming=True
 )
 
