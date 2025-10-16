@@ -8,6 +8,7 @@ from src.config.settings import llm
 from src.utils.supabase.save_prd import save_prd_tx
 from src.utils.prompts.prd import PRD_SYSTEM_PROMPT 
 from src.utils.request_context import get_thread_id, get_user_id
+from src.utils.stream_response import _chunk_to_text
 
 from uuid import UUID
 
@@ -17,7 +18,7 @@ class GeneratePRDInput(BaseModel):
     user_id: Optional[str] = Field(default=None, description="Supabase user ID for ownership of the PRD")
     prd_id: Optional[str] = Field(default=None, description="Optional existing PRD ID (UUID) when regenerating")
 
-async def generate_prd_async(**kwargs: Any) -> str:
+async def generate_prd_async(**kwargs: Any):
     """
     Generate a new PRD based on feature description.
     
@@ -61,15 +62,28 @@ async def generate_prd_async(**kwargs: Any) -> str:
     ]
 
     try:
-        # Generate new PRD
-        new_prd = await llm.ainvoke(messages)
+        full_prd_text = ""
+        async for chunk in llm.astream(messages):
+            text = _chunk_to_text(chunk)
+            if text:
+                full_prd_text += text
 
-        # Save to database (pass prd_id if provided)
-        await save_prd_tx(new_prd, user_id=user_id, feature_name=feature, prd_id=prd_id)
-        
-        return f"""✅ PRD generated successfully!
-🔢 Version: 1
-🎯 Feature: {feature}"""
+        save_task = asyncio.create_task(
+            save_prd_tx(
+                full_prd_text,
+                user_id=user_id,
+                feature_name=feature,
+                prd_id=prd_id,
+            )
+        )
+        await save_task
+
+        summary = (
+            "✅ PRD generated successfully!\n"
+            f"🔢 Version: 1\n"
+            f"🎯 PRD: {full_prd_text}"
+        )
+        return summary
     except Exception as e:
         raise RuntimeError(f"Failed to generate PRD: {str(e)}")
 

@@ -159,6 +159,7 @@ async def get_history(thread_id: str, user_id: str):
                         raise HTTPException(status_code=403, detail="Unauthorized access to thread")
             
             state = await checkpointer.aget(config)
+            print(state)
             if state:
                 messages = state["channel_values"]["messages"]
                 

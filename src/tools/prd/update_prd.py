@@ -1,24 +1,25 @@
 import asyncio
 import json
 from typing import Any, Optional, Type
-from pydantic import BaseModel, Field, ValidationError, create_model
+from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
 from src.config.settings import llm
 from src.utils.supabase.client import supabase
 from src.utils.request_context import get_thread_id
+from src.utils.stream_response import _chunk_to_text 
 
 UPDATE_SYSTEM_PROMPT = """You are an expert Product Manager updating an existing PRD section based on user feedback.
 
 CRITICAL RULES:
-1. You will receive ONLY the existing content for the '{section}' section
-2. Update ONLY the '{section}' section based on feedback
-3. Return STRICTLY a JSON object with a single key '{section}' and the updated value of the correct type
-4. Do NOT include any other sections in the output
-5. Maintain exact structure: for example, List[Story] for user_stories, List[str] for requirements, plain string for timeline, etc.
-
-Make changes realistic, specific, and measurable. Add edge cases if relevant."""
+1. You will receive ONLY the existing content for the '{section}' section.
+2. Analyze the user feedback carefully and update ONLY the specific parts of the '{section}' that are directly addressed or implied by the feedback. Do NOT make unrelated changes to other parts of the section.
+3. Preserve the existing structure, format, and content as much as possible. Only modify, add, or remove elements that are explicitly relevant to the feedback.
+4. If the feedback suggests adding new content, integrate it seamlessly into the existing structure without disrupting the overall format.
+5. Output the updated section in detailed Markdown format, maintaining the original structure where possible
+6. Always use English.
+7. Output ONLY the Markdown content for the section. No JSON, no extra text, no headers outside the section."""
 
 class UpdatePRDInput(BaseModel):
     """Input schema for updating a PRD section."""
@@ -33,31 +34,27 @@ SECTION_FIELD_TYPES: dict[str, Type[Any]] = {
     "assumptions": list[str],
     "dependencies": list[str],
     "risks_and_mitigations": list[dict[str, Any]],
-    "stakeholders": list[str],
+    "stakeholders": list[str], 
     "metrics": list[str],
     "timeline": dict[str, Any],
 }
 
+SECTION_ALIASES: dict[str, str] = {
+    "acceptance_criteria": "functional_requirements",
+}
 
-def _infer_field_type(section: str, existing_value: Any) -> Type[Any]:
-    mapped = SECTION_FIELD_TYPES.get(section)
-    if isinstance(existing_value, str):
-        return str
-    if isinstance(existing_value, list):
-        first_item = existing_value[0] if existing_value else None
-        if isinstance(first_item, dict):
-            return list[dict[str, Any]]
-        if isinstance(first_item, (int, float, bool, str)):
-            return list[type(first_item)]
-        return list[str]
-    if isinstance(existing_value, dict):
-        return dict[str, Any]
-    if isinstance(existing_value, (int, float, bool)):
-        return type(existing_value)
-    if mapped is not None:
-        return mapped
-    return str
+def _normalize_section_name(section: str) -> str:
+    return section.strip().lower()
 
+def _resolve_section_name(section: str) -> str:
+    normalized = _normalize_section_name(section)
+    canonical = SECTION_ALIASES.get(normalized, normalized)
+    if canonical not in SECTION_FIELD_TYPES:
+        available = ", ".join(sorted(SECTION_FIELD_TYPES.keys()))
+        raise ValueError(
+            f"Unsupported section '{section}'. Available sections: {available}"
+        )
+    return canonical
 
 def _deserialize_value(value: Any) -> Any:
     if value is None:
@@ -72,24 +69,18 @@ def _deserialize_value(value: Any) -> Any:
             return value
     return value
 
-
 def _serialize_value(value: Any) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False)
-    return str(value)
-
+    return str(value)  # Untuk markdown, langsung str
 
 async def update_prd_async(**kwargs: Any) -> str:
     """
     Update a specific section of an existing PRD based on feedback.
-    
-    Args:
-        **kwargs: feedback (str), prd_id (str), section (str).
-    
-    Returns:
-        str: Summary of changes + updated full PRD JSON.
+    Collects full LLM output (Markdown) and processes/saves.
+    Returns pure LLM Markdown + summary.
     """
     try:
         input_data = UpdatePRDInput.model_validate(kwargs)
@@ -98,13 +89,18 @@ async def update_prd_async(**kwargs: Any) -> str:
 
     feedback = input_data.feedback
     prd_id = input_data.prd_id or get_thread_id()
-    section = input_data.section
+    requested_section = input_data.section
+    section = _resolve_section_name(requested_section)
+    display_section = requested_section
+    if _normalize_section_name(requested_section) != section:
+        display_section = f"{requested_section} (mapped to {section})"
 
     if not feedback or not section:
         raise ValueError("Feedback and section are required.")
     if not prd_id:
         raise ValueError("PRD ID is required but missing. Make sure to supply thread_id when calling this tool.")
 
+    # Fetch existing section and version
     select_cols = f"{section},version"
     try:
         existing_data = await asyncio.to_thread(
@@ -120,40 +116,44 @@ async def update_prd_async(**kwargs: Any) -> str:
     existing_section_value = _deserialize_value(existing_row.get(section))
     existing_version = existing_row.get("version", 0) or 0
 
-    field_type: Type[Any] = _infer_field_type(section, existing_section_value)
-
-    SectionModel = create_model("SectionUpdate", **{section: (field_type, ...)})
-    structured_llm = llm.with_structured_output(schema=SectionModel, method="function_calling")
-
-    # Prepare concise messages focusing only on the target section
+    # Prepare messages
     pretty_existing = (
-        json.dumps(existing_section_value, ensure_ascii=False) if isinstance(existing_section_value, (dict, list)) else str(existing_section_value or "")
+        json.dumps(existing_section_value, ensure_ascii=False, indent=2)
+        if isinstance(existing_section_value, (dict, list))
+        else str(existing_section_value or "")
     )
     human_content = (
         f"EXISTING SECTION '{section}':\n{pretty_existing}\n\n"
         f"USER FEEDBACK: {feedback}\n\n"
-        f"Return strictly JSON with key '{section}' containing the updated value."
+        f"Output the updated section in detailed Markdown format as per the system prompt."
     )
+    prompt = UPDATE_SYSTEM_PROMPT.replace("{section}", section)
     messages = [
-        SystemMessage(content=UPDATE_SYSTEM_PROMPT.format(section=section)),
+        SystemMessage(content=prompt),
         HumanMessage(content=human_content),
     ]
 
+    # Stream and collect full LLM output
+    full_text = ""
+    async for chunk in llm.astream(messages):
+        text = _chunk_to_text(chunk)
+        if text:
+            full_text += text
+
     try:
-        # Generate updated section only
-        section_result = await structured_llm.ainvoke(messages)
-        updated_section = section_result.model_dump().get(section)
+        # No JSON parse: full_text is the updated markdown
+        updated_section = full_text.strip()
+        if not updated_section:
+            raise ValueError("LLM output is empty")
 
-        # Calculate simple diff summary for list-type sections
-        old_len = len(existing_section_value) if isinstance(existing_section_value, list) else None
-        new_len = len(updated_section) if isinstance(updated_section, list) else None
-        changes_summary = f"Updated '{section}'"
-        if old_len is not None and new_len is not None:
-            diff = new_len - old_len
-            if diff != 0:
-                changes_summary += f" ({diff:+d} items)"
+        # Simple diff summary (rough, based on length for non-list)
+        old_len = len(str(existing_section_value)) if existing_section_value else 0
+        new_len = len(updated_section)
+        changes_summary = f"Updated '{display_section}'"
+        if new_len > old_len:
+            changes_summary += f" (added details)"
 
-        # Persist only the updated section and bump version (non-blocking)
+        # Save to DB (serialize markdown as str)
         new_version = existing_version + 1
         serialized_section = _serialize_value(updated_section)
         await asyncio.to_thread(
@@ -164,7 +164,10 @@ async def update_prd_async(**kwargs: Any) -> str:
             .execute()
         )
 
-        return f"✅ {changes_summary}\n📄 PRD ID: {prd_id}\n🔢 Version: {new_version}"
+        # Return pure LLM Markdown + summary
+        summary = f"\n\n✅ {changes_summary}\n📄 PRD ID: {prd_id}\n🔢 Version: {new_version}"
+        return updated_section + summary
+
     except Exception as e:
         raise RuntimeError(f"Failed to update PRD: {str(e)}")
 
@@ -172,15 +175,14 @@ async def update_prd_async(**kwargs: Any) -> str:
 def update_prd_sync(**kwargs: Any) -> str:
     return asyncio.run(update_prd_async(**kwargs))
 
-# StructuredTool
 update_prd = StructuredTool.from_function(
     func=update_prd_sync,
     name="update_prd",
     description=(
         "Update a specific section of an existing PRD based on feedback. "
-        "Parameters: feedback (str, required), prd_id (str, optional - defaults to thread_id), section (str, required, e.g., 'stakeholders'). "
-        "Returns summary of changes and updated PRD details."
+        "Generates updated section in detailed Markdown format, saves, and returns Markdown + summary. "
+        "Parameters: feedback (str, required), prd_id (str, optional - defaults to thread_id), section (str, required, e.g., 'stakeholders')."
     ),
     args_schema=UpdatePRDInput,
-    coroutine=lambda **kwargs: update_prd_async(**kwargs),
+    coroutine=update_prd_async,
 )
