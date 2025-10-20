@@ -4,7 +4,6 @@ from typing import Any, Optional, Type
 from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
-from langgraph.types import interrupt
 
 from src.config.settings import llm
 from src.utils.supabase.client import supabase
@@ -141,45 +140,33 @@ async def update_prd_async(**kwargs: Any) -> str:
         if text:
             full_text += text
 
-    human_decision = interrupt(
-        f"📝 Updated section '{display_section}':\n{full_text}",
-    )
+    try:
+        updated_section = full_text.strip()
+        if not updated_section:
+            raise ValueError("LLM output is empty")
 
-    if human_decision["type"] == "accept":
-        try:
-            # No JSON parse: full_text is the updated markdown
-            updated_section = full_text.strip()
-            if not updated_section:
-                raise ValueError("LLM output is empty")
+        old_len = len(str(existing_section_value)) if existing_section_value else 0
+        new_len = len(updated_section)
+        changes_summary = f"Updated '{display_section}'"
+        if new_len > old_len:
+            changes_summary += f" (added details)"
 
-            # Simple diff summary (rough, based on length for non-list)
-            old_len = len(str(existing_section_value)) if existing_section_value else 0
-            new_len = len(updated_section)
-            changes_summary = f"Updated '{display_section}'"
-            if new_len > old_len:
-                changes_summary += f" (added details)"
+        new_version = existing_version + 1
+        serialized_section = _serialize_value(updated_section)
+        await asyncio.to_thread(
+            lambda: supabase
+            .table("prds")
+            .update({section: serialized_section, "version": new_version})
+            .eq("id", prd_id)
+            .execute()
+        )
 
-            # Save to DB (serialize markdown as str)
-            new_version = existing_version + 1
-            serialized_section = _serialize_value(updated_section)
-            await asyncio.to_thread(
-                lambda: supabase
-                .table("prds")
-                .update({section: serialized_section, "version": new_version})
-                .eq("id", prd_id)
-                .execute()
-            )
+        # Return pure LLM Markdown + summary
+        summary = f"\n\n✅ {changes_summary}\n📄 PRD ID: {prd_id}\n🔢 Version: {new_version}"
+        return updated_section + summary
 
-            # Return pure LLM Markdown + summary
-            summary = f"\n\n✅ {changes_summary}\n📄 PRD ID: {prd_id}\n🔢 Version: {new_version}"
-            return updated_section + summary
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to update PRD: {str(e)}")
-    elif human_decision["type"] == "reject":
-        return "🚫 User rejected the update."
-    else:
-        raise ValueError(f"Unknown decision type: {human_decision['type']}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to update PRD: {str(e)}")
 
 # Sync wrapper
 def update_prd_sync(**kwargs: Any) -> str:
