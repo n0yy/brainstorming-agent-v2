@@ -7,6 +7,7 @@ from src.utils.request_context import (
     set_thread_id,
     set_user_id,
 )
+from src.tools.memory import Context
 
 
 def _chunk_to_text(chunk: Any) -> str:
@@ -58,6 +59,7 @@ async def stream_response(agent, query: str, config) -> AsyncGenerator[str, None
             {"messages": [{"role": "user", "content": query}]},
             config=config,
             stream_mode="messages",
+            context=Context(user_id=user_token),
         ):
             event_name = event["event"]
 

@@ -5,12 +5,36 @@ import os
 
 load_dotenv()
 
-llm = ChatOpenAI(
+base_model = ChatOpenAI(
+    api_key=os.getenv("LITELLM_API_KEY"),
+    base_url=os.getenv("LITELLM_BASE_URL"),
+    model="openrouter/openai/gpt-oss-20b",
+    streaming=False,
+    temperature=0.0
+)
+
+simple_model = ChatOpenAI(
+    api_key=os.getenv("LITELLM_API_KEY"),
+    base_url=os.getenv("LITELLM_BASE_URL"),
+    model="openrouter/openai/gpt-oss-20b",
+    streaming=True, 
+    temperature=0.0
+)
+
+medium_model = ChatOpenAI(
     api_key=os.getenv("LITELLM_API_KEY"),
     base_url=os.getenv("LITELLM_BASE_URL"),
     model="azure/gpt-oss-120b",
     streaming=True, 
-    temperature=0.1
+    temperature=0.0
+)
+
+complex_model = ChatOpenAI(
+    api_key=os.getenv("LITELLM_API_KEY"),
+    base_url=os.getenv("LITELLM_BASE_URL"),
+    model="azure/gpt-oss-120b",
+    streaming=True, 
+    temperature=0.0
 )
 
 embedding = OpenAIEmbeddings(

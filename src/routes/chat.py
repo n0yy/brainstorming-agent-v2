@@ -1,14 +1,11 @@
-from langgraph.prebuilt import create_react_agent
+from langchain.agents.middleware import SummarizationMiddleware
 from psycopg import AsyncConnection
 from langgraph.store.postgres.aio import AsyncPostgresStore
-from langmem import create_manage_memory_tool, create_search_memory_tool
 
-from src.config.settings import llm, embedding
-from src.tools.prd import generate_prd, update_prd 
-from src.tools.current_time import get_current_time
 from src.utils.stream_response import stream_response
 from src.utils.checkpointer import UserAwarePostgresSaver
-from src.tools.web_search import web_search
+from src.config.settings import simple_model, embedding
+from src.agent import build_agent, DEFAULT_SYSTEM_PROMPT
 
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
@@ -220,46 +217,22 @@ async def chat(
             )
         )
 
-        # Setup tools
-        memory_tools = [
-            create_manage_memory_tool(namespace=("memories", "{user_id}")),
-            create_search_memory_tool(namespace=("memories", "{user_id}"))
-        ]
+        system_prompt = DEFAULT_SYSTEM_PROMPT.format(
+            user_id=payload.user_id,
+            thread_id=thread_id,
+        )
 
-        all_tools = [
-            web_search,
-            generate_prd,
-            update_prd,
-            get_current_time,
-            *memory_tools
-        ]
-
-        system_prompt = f"""You are an AI Assistant designed to understand user queries deeply and select the most appropriate tools to resolve them efficiently.
-
-MEMORY MANAGEMENT (Priority):
-- When users ask about themselves: ALWAYS search_memory first, NEVER web search
-- Save user preferences, context, and goals naturally without asking
-- If no memory found, communicate honestly
-
-TOOL USAGE:
-- get_current_time: For time-related queries
-- TavilySearch: For current events/research (NOT user information)
-- generate_prd/update_prd: When explicitly requested
-  * Use prd_id="{thread_id}", user_id="{payload.user_id}"
-  * Always summarize PRD after generation
-
-RESPONSE STYLE:
-- Match user's language exactly (Indonesian → Indonesian, English → English)
-- Be conversational, friendly, and helpful
-- Use appropriate casual expressions naturally
-- Stay accurate while being personable"""
-
-        agent = create_react_agent(
-            model=llm,
-            tools=all_tools,
+        agent = build_agent(
+            system_prompt=system_prompt,
             checkpointer=checkpointer,
             store=store,
-            prompt=system_prompt
+            extra_middleware=[
+                SummarizationMiddleware(
+                    model=simple_model,
+                    max_tokens_before_summary=5000,
+                    messages_to_keep=20
+                )
+            ]
         )
 
         response = StreamingResponse(
@@ -273,7 +246,7 @@ RESPONSE STYLE:
             background=BackgroundTask(schedule_stack_close, stack)
         )
         
-        stack = None  # Prevent cleanup in finally block
+        stack = None
         return response
         
     except Exception as e:

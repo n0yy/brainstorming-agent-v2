@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
-from src.config.settings import llm
+from src.config.settings import medium_model as llm
 from src.utils.supabase.save_prd import save_prd_tx
 from src.utils.prompts.prd import PRD_SYSTEM_PROMPT 
 from src.utils.request_context import get_thread_id, get_user_id

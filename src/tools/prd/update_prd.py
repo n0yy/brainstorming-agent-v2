@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
-from src.config.settings import llm
+from src.config.settings import medium_model as llm
 from src.utils.supabase.client import supabase
 from src.utils.request_context import get_thread_id
 from src.utils.stream_response import _chunk_to_text 
