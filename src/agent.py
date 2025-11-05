@@ -86,10 +86,17 @@ def build_agent(
 
     return create_agent(
         model=simple_model,
-        tools=list(_base_tools()),
+        tools=[
+            web_search,
+            generate_prd,
+            update_prd,
+            get_current_time,
+            execute_bash,
+            http_request
+        ],
         checkpointer=checkpointer,
         store=store,
-        system_prompt=instructions,
+        system_prompt=DEFAULT_SYSTEM_PROMPT,
         middleware=middleware,
     )
 
