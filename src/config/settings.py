@@ -8,17 +8,16 @@ load_dotenv()
 base_model = ChatOpenAI(
     api_key=os.getenv("LITELLM_API_KEY"),
     base_url=os.getenv("LITELLM_BASE_URL"),
-    model="openrouter/openai/gpt-oss-20b",
+    model="openrouter/qwen/qwen3-8b",
     streaming=False,
-    temperature=0.0
+    temperature=0.0,
 )
 
 simple_model = ChatOpenAI(
     api_key=os.getenv("LITELLM_API_KEY"),
     base_url=os.getenv("LITELLM_BASE_URL"),
-    model="openrouter/openai/gpt-oss-20b",
+    model="azure/gpt-oss-20b",
     streaming=True, 
-    temperature=0.0
 )
 
 medium_model = ChatOpenAI(

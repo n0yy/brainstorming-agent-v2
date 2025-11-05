@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Optional
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
 from langgraph.store.base import BaseStore
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from src.middleware.errors import handle_tool_errors
-from src.middleware.model_selector import async_model_selector
-from src.tools.current_time import get_current_time
-from src.tools.memory import create_memory
-from src.tools.prd import generate_prd, update_prd
-from src.tools.web_search import web_search
+from src.middleware.model_selector import ModelSelectorMiddleware
+from src.tools import execute_bash, generate_prd, get_current_time, http_request, web_search, update_prd 
 from src.config.settings import simple_model
+from src.middleware.todo import TodoListMiddleware
+from code_agent import instructions
 
 DEFAULT_SYSTEM_PROMPT = """You are King Abel, a wise and charismatic AI assistant! 🤖✨
 
@@ -49,7 +49,8 @@ def _base_tools() -> Iterable:
         generate_prd,
         update_prd,
         get_current_time,
-        create_memory,
+        execute_bash,
+        http_request
     )
 
 
@@ -58,7 +59,6 @@ def build_agent(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     checkpointer: Optional[BaseCheckpointSaver] = None,
     store: Optional[BaseStore] = None,
-    extra_middleware: Optional[Sequence] = None,
 ):
     """
     Construct the LangGraph agent with shared middleware and tools.
@@ -73,9 +73,15 @@ def build_agent(
     store:
         Optional vector store for contextual retrieval.
     """
-    middleware = list(extra_middleware or []) + [
-        async_model_selector,
+    middleware = [
+        ModelSelectorMiddleware(),
         handle_tool_errors,
+        SummarizationMiddleware(
+            model=simple_model,
+            max_tokens_before_summary=4000,
+            messages_to_keep=20
+        ),
+        TodoListMiddleware()
     ]
 
     return create_agent(
@@ -83,10 +89,9 @@ def build_agent(
         tools=list(_base_tools()),
         checkpointer=checkpointer,
         store=store,
-        system_prompt=system_prompt,
+        system_prompt=instructions,
         middleware=middleware,
     )
 
 
-# Export default graph instance for CLI tooling. Uses no persistent resources.
 agent = build_agent()

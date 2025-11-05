@@ -1,23 +1,24 @@
 from langchain_core.tools import tool
-from langchain_tavily import TavilySearch
+from tavily import TavilyClient
 
 import os
 from dotenv import load_dotenv
-from typing import Any
+from typing import Literal
+
 
 load_dotenv()
 
+tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 @tool
-def web_search(query: str) -> Any:
-    """
-    This function uses the Firecrawl API to search the web.
-
-    Args:
-        query (str): The search query.
-
-    Returns:
-        Any: The search results.
-    """
-    search = TavilySearch(api_key=os.getenv("TAVILY_API_KEY"))
-    search_results = search.invoke(query)
-    return search_results
+def web_search(query: str,
+    max_results: int = 5,
+    topic: Literal["general", "news", "finance"] = "general",
+    include_raw_content: bool = False,
+):
+    """Run a web search"""
+    return tavily_client.search(
+        query,
+        max_results=max_results,
+        include_raw_content=include_raw_content,
+        topic=topic,
+    )

@@ -33,7 +33,7 @@ class EpisodicMemory(BaseModel):
 
 with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
     @tool("create_memory")
-    def create_memory(episode: EpisodicMemory, runtime: ToolRuntime[Context]) -> str:
+    async def create_memory(episode: EpisodicMemory, runtime: ToolRuntime[Context]) -> str:
         """
         Store an episode of memory in the database.
 
@@ -47,5 +47,5 @@ with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
         store = runtime.store
         user_id = runtime.context.user_id
 
-        store.put(("episode",), user_id, episode)
+        await store.aput(("episode",), user_id, episode)
         return "Memory created"

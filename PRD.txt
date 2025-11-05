@@ -1,0 +1,283 @@
+# PRD: E-Commerce Thrifting Platform (React Native + Appwrite)
+
+## Introduction
+
+### Purpose
+
+The purpose of this project is to develop a mobile-first e-commerce platform specialized for vintage (thrifting) product trading. It aims to bridge buyers and sellers of pre-owned items through a seamless digital marketplace.
+
+### Scope
+
+This platform will focus on core features required for thrifting, including product listings, user profiles, search functionality, and secure payment processing. It will not include third-party marketplace integration or logistics management.
+
+### Objectives
+
+* Enable secure and convenient buying/selling of vintage items via mobile devices.
+
+* Provide an intuitive search and filtering system for vintage products.
+
+* Ensure authenticated user management (buyers and sellers).
+
+* Implement a reliable payment system integrated with Appwrite backend.
+
+## User Stories
+
+### Story 1: Browse Vintage Product Listings
+
+* **Description**\
+  As a buyer, I want to browse and filter vintage product listings so that I can find items matching my preferences.
+
+* **Actors / Persona**
+
+  * [Buyer] – A user seeking pre-owned items for personal use or resale.
+
+  * [Seller] – A user listing vintage products for sale.
+
+* **Pre-Condition**
+
+  * [App installation completed] – The mobile app must be installed on the buyer’s device.
+
+  * [User authenticated] – The buyer must log in to view listings.
+
+* **Done When**
+
+  1. Open the app and navigate to the product catalog.
+
+  2. Apply filters (e.g., category, price range, condition).
+
+  3. Display relevant listings with images and descriptions.
+
+* **Exception Handling**
+
+  * [No results found] – Show a message suggesting expanding search criteria.
+
+  * [Network error] – Display retry option or offline mode notification.
+
+* **Acceptance Criteria**
+
+  * [Criteria 1] – UI displays 10-20 listings per page with accurate filtering.
+
+  * [Criteria 2] – Search results match keywords/filters.
+
+  * [Criteria 3] – Listings include valid images, prices, and seller ratings.
+
+### Story 2: List Vintage Items for Sale
+
+* **Description**\
+  As a seller, I want to create and manage product listings so that I can sell my vintage items.
+
+* **Actors / Persona**
+
+  * [Seller] – An individual or business offering vintage products.
+
+* **Pre-Condition**
+
+  * [User account verified] – The seller must have a verified Appwrite account.
+
+  * [Product details prepared] – Seller must provide item name, price, condition, and photos.
+
+* **Done When**
+
+  1. Seller navigates to the "Create Listing" section.
+
+  2. Inputs product details and uploads images.
+
+  3. Submits listing via Appwrite API.
+
+* **Exception Handling**
+
+  * [Invalid data] – Show error messages for missing fields or incorrect formats.
+
+  * [API timeout] – Retry submission or notify admin.
+
+* **Acceptance Criteria**
+
+  * [Criteria 1] – Listing appears in search results within 5 seconds.
+
+  * [Criteria 2] – Seller receives confirmation email/SMS.
+
+  * [Criteria 3] – Appwrite logs the listing metadata successfully.
+
+### Story 3: Secure Payment Processing
+
+* **Description**\
+  As a buyer, I want to complete payments securely so that my transactions are protected.
+
+* **Actors / Persona**
+
+  * [Buyer] – A user ready to purchase a listed item.
+
+* **Pre-Condition**
+
+  * [Item in cart] – Buyer must select an item and proceed to checkout.
+
+  * [Payment method configured] – Appwrite must integrate a payment gateway (e.g., Stripe).
+
+* **Done When**
+
+  1. Buyer navigates to checkout and selects payment option.
+
+  2. Appwrite authenticates payment and processes the transaction.
+
+  3. Buyer receives order confirmation.
+
+* **Exception Handling**
+
+  * [Payment failure] – Redirect to payment page or offer alternative methods.
+
+  * [Failed order confirmation] – Notify buyer and seller via email/SMS.
+
+* **Acceptance Criteria**
+
+  * [Criteria 1] – Payment processing time under 10 seconds.
+
+  * [Criteria 2] – Transaction encrypted via HTTPS.
+
+  * [Criteria 3] – Appwrite logs transaction details for audit.
+
+### Story 4: Search Products by Category (e.g., Fashion, Electronics Vintage)
+
+* **Description**\
+  As a buyer, I want to search for vintage products by category (e.g., fashion, electronics) so that I can quickly find relevant items.
+
+* **Actors / Persona**
+
+  * [Buyer] – A user browsing specific vintage product types.
+
+* **Pre-Condition**
+
+  * [App installed and user authenticated] – The app must be installed, and the user must be logged in.
+
+* **Done When**
+
+  1. Navigate to the search section and select a category (e.g., fashion, electronics).
+
+  2. Display filtered listings matching the selected category.
+
+* **Exception Handling**
+
+  * [No listings in category] – Show a message indicating the category has no available items.
+
+  * [Network error] – Display retry option or offline mode notification.
+
+* **Acceptance Criteria**
+
+  * [Criteria 1] – Search results update in real-time as categories are selected.
+
+  * [Criteria 2] – Listings displayed are strictly within the selected category.
+
+  * [Criteria 3] – Category filters are clearly labeled and functional.
+
+### Story 5: Add/Edit Product Reviews with 1-5 Rating
+
+* **Description**\
+  As a buyer, I want to add or edit reviews with a 1-5 rating for purchased vintage items so that sellers can receive feedback.
+
+* **Actors / Persona**
+
+  * [Buyer] – A user who has purchased a vintage item.
+
+* **Pre-Condition**
+
+  * [Product purchased] – The buyer must have completed a transaction for the item.
+
+* **Done When**
+
+  1. Navigate to the product detail page and select "Write a Review."
+
+  2. Enter a rating (1-5) and optional text feedback.
+
+  3. Submit the review via Appwrite API.
+
+* **Exception Handling**
+
+  * [Invalid rating] – Show error if rating is outside 1-5 range.
+
+  * [API failure] – Notify the buyer that the review could not be submitted.
+
+* **Acceptance Criteria**
+
+  * [Criteria 1] – Reviews appear on the product page within 5 seconds of submission.
+
+  * [Criteria 2] – Ratings are stored in Appwrite collections with timestamps.
+
+  * [Criteria 3] – Reviews include both numerical ratings and text comments.
+
+## Functional Requirements
+
+* Core features: Product listings, user profiles, search/filter, authentication, payment integration, cart management.
+
+* Admin dashboard for listing moderation (optional, phase 2).
+
+* Real-time notifications for new listings or messages.
+
+## Non-Functional Requirements
+
+* **Security**: Data encryption (Appwrite collections), secure authentication (OAuth 2.0 or email/password).
+
+* **Performance**: Page load time < 3 seconds, API response time < 2 seconds.
+
+* **Scalability**: Support 1,000 concurrent users without performance degradation.
+
+* **Compatibility**: React Native app must work on iOS and Android.
+
+## Assumptions
+
+* Third-party payment gateways (e.g., Stripe) will be integrated via Appwrite APIs.
+
+* Users have basic digital literacy to navigate mobile apps.
+
+* Appwrite’s database and authentication services are stable and available 24/7.
+
+## Dependencies
+
+* React Native development environment.
+
+* Appwrite backend with configured collections (products, users, orders).
+
+* Payment gateway API keys (e.g., Stripe, PayPal).
+
+* Legal compliance for vintage product sales (e.g., customs regulations).
+
+## Risks and Mitigations
+
+* **Risk**: Appwrite API limitations (e.g., rate limiting).\
+  **Mitigation**: Implement caching for frequent API calls and monitor usage.
+
+* **Risk**: User data privacy concerns.\
+  **Mitigation**: Adopt end-to-end encryption and GDPR-compliant data handling.
+
+* **Risk**: App store rejection due to payment security.\
+  **Mitigation**: Conduct security audits pre-launch.
+
+## Timeline
+
+* **Phase 1 (Weeks 1-4)**: Requirements finalization, backend setup (Appwrite), UI/UX design.
+
+* **Phase 2 (Weeks 5-8)**: React Native frontend development, payment integration.
+
+* **Phase 3 (Weeks 9-11)**: User testing, QA, and bug fixes.
+
+* **Phase 4 (Week 12)**: Launch and post-launch monitoring.
+
+## Stakeholders
+
+* **Clients**: Vintage product owners/sellers.
+
+* **Developers**: React Native and Appwrite engineers.
+
+* **Designers**: UI/UX designer (Figma files provided).
+
+* **Payment Providers**: Stripe/PayPal integration partners.
+
+## Metricss
+
+* **Key Metrics**:
+
+  * User registration/seller onboarding rate.
+
+  * Average time to complete a purchase.
+
+  * Conversion rate from browsing to purchase.
+
+  * System uptime and API response time.

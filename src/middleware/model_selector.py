@@ -1,65 +1,120 @@
-from langchain.agents.middleware import (
-    wrap_model_call,
-    ModelRequest,
-    ModelResponse
-)
-from typing_extensions import TypedDict, Literal
+from typing import Literal
+from pydantic import BaseModel, Field
+from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from src.config.settings import base_model, simple_model, medium_model, complex_model
 
-class ModelSelector(TypedDict):
-    complexity: Literal["simple", "medium", "complex"]
 
-@wrap_model_call
-async def async_model_selector(
-    request: ModelRequest, 
-    handler
-) -> ModelResponse:
-    
+class ModelComplexity(BaseModel):
+    complexity: Literal["simple", "medium", "complex"] = Field(
+        description="Complexity level of the query"
+    )
+
+
+class ModelSelectorMiddleware(AgentMiddleware):
     """
-    This middleware selects the best model to use based on the complexity of the query.
-    
-    It works by using the base model to generate a structured output based on the query.
-    The structured output is then used to determine which model to use.
-    
-    If the structured output is "simple", the simple model is used.
-    If the structured output is "medium", the medium model is used.
-    If the structured output is "complex", the complex model is used.
-    Otherwise, the base model is used.
-    
-    The selected model is then used to generate the response.
+    Selects appropriate model based on query complexity.
+    Uses base_model to analyze complexity, then routes to:
+    - simple_model: one-step tasks
+    - medium_model: multi-step reasoning
+    - complex_model: long-form generation, system design
     """
-    query = request.state["messages"][-1].content
 
-    model_structured = base_model.with_structured_output(ModelSelector)
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a query complexity analyst. "
-                "Classify the user query into one of three levels: simple, medium, or complex.\n\n"
-                "Rules:\n"
-                "- simple: direct questions or tasks solvable in one step (e.g. short factual Q&A, simple code fix).\n"
-                "- medium: requires reasoning, multi-step logic, or structured explanation (e.g. function refactor, analysis request).\n"
-                "- complex: involves long-form generation, system design, PRD creation, multi-agent orchestration, or high ambiguity.\n\n"
-                "Return JSON with a single key 'complexity'."
-            ),
-        },
-        {"role": "user", "content": query},
-    ]
+    def wrap_model_call(self, request: ModelRequest, handler) -> ModelResponse:
+        messages = request.state.get("messages", [])
+        if not messages:
+            return handler(request)
 
-    result = model_structured.invoke(messages)
+        query = messages[-1].content
 
-    print(result)
+        try:
+            classifier = base_model.with_structured_output(
+                ModelComplexity,
+            ).with_config(
+                {
+                    "callbacks": [],
+                    "metadata": {"internal_run": "model_selector"},
+                }
+            )
+            
+            classification_prompt = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Classify query complexity into: simple, medium, or complex.\n\n"
+                        "Rules:\n"
+                        "- simple: direct questions, single-step tasks (e.g. 'What is X?', 'Fix this typo')\n"
+                        "- medium: multi-step logic, analysis, refactoring (e.g. 'Compare A and B', 'Optimize this function')\n"
+                        "- complex: long-form content, system design, PRD, high ambiguity (e.g. 'Design a distributed system', 'Write a comprehensive guide')\n"
+                    ),
+                },
+                {"role": "user", "content": query},
+            ]
 
-    if result["complexity"] == "simple":
-        model = simple_model
-    elif result["complexity"] == "medium":
-        model = medium_model
-    elif result["complexity"] == "complex":
-        model = complex_model
-    else:
-        model = base_model
+            result = classifier.invoke(classification_prompt)
+            
+            if result.complexity == "simple":
+                selected_model = simple_model
+            elif result.complexity == "medium":
+                selected_model = medium_model
+            elif result.complexity == "complex":
+                selected_model = complex_model
+            else:
+                selected_model = base_model
+            
+            request.model = selected_model
+            return handler(request)
 
-    request.model = model
-    
-    return await handler(request)
+        except Exception:
+            return handler(request)
+
+
+    async def awrap_model_call(
+        self, request: ModelRequest, handler
+    ) -> ModelResponse:
+        messages = request.state.get("messages", [])
+        if not messages:
+            return await handler(request)
+
+        query = messages[-1].content
+
+        try:
+            classifier = base_model.with_structured_output(
+                ModelComplexity,
+                include_raw=False
+            ).with_config(
+                {
+                    "callbacks": [],
+                    "metadata": {"internal_run": "model_selector"},
+                }
+            )
+            
+            classification_prompt = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Classify query complexity into: simple, medium, or complex.\n\n"
+                        "Rules:\n"
+                        "- simple: direct questions, single-step tasks (e.g. 'What is X?', 'Fix this typo')\n"
+                        "- medium: multi-step logic, analysis, refactoring (e.g. 'Compare A and B', 'Optimize this function')\n"
+                        "- complex: long-form content, system design, PRD, high ambiguity (e.g. 'Design a distributed system', 'Write a comprehensive guide')\n"
+                    ),
+                },
+                {"role": "user", "content": query},
+            ]
+
+            result = await classifier.ainvoke(classification_prompt)
+            
+            if result.complexity == "simple":
+                selected_model = simple_model
+            elif result.complexity == "medium":
+                selected_model = medium_model
+            elif result.complexity == "complex":
+                selected_model = complex_model
+            else:
+                selected_model = base_model
+            
+            request.model = selected_model
+            return await handler(request)
+
+        except Exception:
+            return await handler(request)

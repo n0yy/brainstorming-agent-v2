@@ -1,4 +1,3 @@
-from langchain.agents.middleware import SummarizationMiddleware
 from psycopg import AsyncConnection
 from langgraph.store.postgres.aio import AsyncPostgresStore
 
@@ -18,11 +17,6 @@ from datetime import datetime
 import os
 from contextlib import AsyncExitStack
 import asyncio
-import logging
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -34,7 +28,6 @@ def get_db_uri() -> str:
     """Dependency untuk mendapatkan DB URI dengan proper error handling"""
     db_uri = os.getenv("DB_URI")
     if not db_uri:
-        logger.error("DB_URI not configured in environment")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database configuration missing"
@@ -105,8 +98,7 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     """Embedding function dengan error handling"""
     try:
         return embedding.embed_documents(texts)
-    except Exception as e:
-        logger.error(f"Embedding error: {str(e)}")
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Embedding service error"
@@ -120,8 +112,8 @@ def schedule_stack_close(stack: AsyncExitStack) -> None:
         loop.create_task(stack.aclose())
     except RuntimeError:
         asyncio.run(stack.aclose())
-    except Exception as e:
-        logger.error(f"Error closing stack: {str(e)}")
+    except Exception:
+        return
 
 
 async def get_prd_info(conn: AsyncConnection, thread_id: str, user_id: str) -> Optional[PRDInfo]:
@@ -162,8 +154,7 @@ async def get_prd_info(conn: AsyncConnection, thread_id: str, user_id: str) -> O
                 created_at=row[13],
                 updated_at=row[14]
             )
-    except Exception as e:
-        logger.error(f"Error fetching PRD: {str(e)}")
+    except Exception:
         return None
 
 
@@ -226,13 +217,6 @@ async def chat(
             system_prompt=system_prompt,
             checkpointer=checkpointer,
             store=store,
-            extra_middleware=[
-                SummarizationMiddleware(
-                    model=simple_model,
-                    max_tokens_before_summary=5000,
-                    messages_to_keep=20
-                )
-            ]
         )
 
         response = StreamingResponse(
@@ -249,8 +233,7 @@ async def chat(
         stack = None
         return response
         
-    except Exception as e:
-        logger.error(f"Chat error for thread {thread_id}: {str(e)}")
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process chat request"
@@ -345,8 +328,7 @@ async def get_history(
                 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error in get_history: {str(e)}")
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve history"
@@ -406,8 +388,7 @@ async def get_user_threads(
                     for row in threads
                 ]
                 
-    except Exception as e:
-        logger.error(f"Error in get_user_threads: {str(e)}")
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user threads"
