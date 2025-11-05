@@ -1,17 +1,18 @@
-# API Documentation
+# Brainstorming Agent v2
 
-API untuk chat assistant dengan dukungan memory management, PRD generation, dan multi-tool integration menggunakan LangGraph, FastAPI, dan Supabase.
+AI-powered chat assistant untuk brainstorming dan development tasks dengan dukungan memory management, PRD generation, code assistance, dan multi-tool integration menggunakan LangGraph, FastAPI, dan Supabase.
 
 ## Base URL
 
 ```
-http://localhost:8000
+http://localhost:8008
 ```
 
 ## Tech Stack
 
 - **FastAPI**: REST API framework
-- **LangGraph**: Agent orchestration & state management
+- **LangChain**: LLM integration & tooling
+- **DeepAgents**: Advanced AI agent framework dengan subagents
 - **Supabase/PostgreSQL**: Database & storage
 - **LangMem**: Memory management untuk user context
 - **Tavily**: Web search tool
@@ -29,7 +30,7 @@ Cek status API.
 **Response:**
 ```json
 {
-  "message": "Simplify Studio v0",
+  "message": "Brainstorming Agent v2",
   "status": "healthy"
 }
 ```
@@ -40,7 +41,7 @@ Cek status API.
 
 **POST** `/api/chat/{thread_id}`
 
-Stream conversation dengan AI agent yang bisa menggunakan berbagai tools (memory, search, PRD generation, dll).
+Stream conversation dengan AI agent King Abel yang bisa menggunakan berbagai tools (memory, search, PRD generation, code assistance, dll).
 
 **Path Parameters:**
 - `thread_id` (string, required): Unique identifier untuk conversation thread
@@ -63,7 +64,7 @@ Stream conversation dengan AI agent yang bisa menggunakan berbagai tools (memory
 
 **Example Request:**
 ```bash
-curl -X POST "http://localhost:8000/api/chat/thread_abc123" \
+curl -X POST "http://localhost:8008/api/chat/thread_abc123" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "Buatkan PRD untuk fitur authentication",
@@ -75,8 +76,11 @@ curl -X POST "http://localhost:8000/api/chat/thread_abc123" \
 - 🧠 Memory search & management (user preferences, context)
 - 🔍 Web search (Tavily) untuk research & current events
 - 📝 PRD generation & updates
+- 💻 Code assistance (bash commands, reviews, testing)
+- 🔧 HTTP requests untuk API integration
 - ⏰ Current time information
 - 💬 Multi-language support (auto-detect)
+- 🤖 Subagents (code reviewer, test generator)
 
 **Error Responses:**
 - `400`: Invalid request payload
@@ -148,7 +152,7 @@ Ambil semua messages dan PRD info dari sebuah thread.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/chat/thread_abc123/history?user_id=user_123"
+curl "http://localhost:8008/api/chat/thread_abc123/history?user_id=user_123"
 ```
 
 ---
@@ -197,7 +201,7 @@ Ambil semua conversation threads milik user, sorted by most recent.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/chat/user/user_123/threads"
+curl "http://localhost:8008/api/chat/user/user_123/threads"
 ```
 
 ---
@@ -205,9 +209,20 @@ curl "http://localhost:8000/api/chat/user/user_123/threads"
 ## Environment Variables
 
 ```env
+# Database
 DB_URI=postgresql://user:password@localhost:5432/dbname
-OPENAI_API_KEY=sk-...
+
+# AI Services
+LITELLM_API_KEY=sk-...
+LITELLM_BASE_URL=https://...
+
+# Search & Scraping
 TAVILY_API_KEY=tvly-...
+FIRECRAWL_API_KEY=fc-...
+
+# Supabase (optional, for additional features)
+SUPABASE_URL=https://...
+SUPABASE_ANON_KEY=...
 ```
 
 ## Database Schema
@@ -232,6 +247,13 @@ CREATE TABLE prds (
   introduction TEXT,
   user_stories JSONB,
   functional_requirements JSONB,
+  non_functional_requirements JSONB,
+  assumptions JSONB,
+  dependencies JSONB,
+  risks_and_mitigations JSONB,
+  timeline TEXT,
+  stakeholders JSONB,
+  metrics JSONB,
   version INTEGER,
   created_at TIMESTAMP,
   updated_at TIMESTAMP
@@ -248,9 +270,18 @@ CREATE TABLE prds (
 - **generate_prd**: Create new Product Requirements Document
 - **update_prd**: Update existing PRD dengan versioning
 
+### Code Tools
+- **execute_bash**: Run shell commands (linting, testing, building)
+- **web_search**: Search web untuk documentation & solutions
+- **http_request**: Make HTTP requests untuk API integration
+
 ### Utility Tools
 - **TavilySearch**: Web search untuk current events
 - **get_current_time**: Get current datetime
+
+### Subagents
+- **code_reviewer_agent**: Expert code reviewer untuk quality & security
+- **test_generator_agent**: Automated test suite generator
 
 ## Usage Flow
 
@@ -334,7 +365,7 @@ cp .env.example .env
 alembic upgrade head
 
 # Start server
-uvicorn main:app --reload
+uvicorn main:app --host 0.0.0.0 --port 8008 --reload
 ```
 
 ### Testing
@@ -344,4 +375,20 @@ pytest tests/
 
 # With coverage
 pytest --cov=src tests/
+
+# Using Makefile
+make test
+make test-cov
+```
+
+### Additional Commands
+```bash
+# Development setup
+make setup
+
+# Run server
+make run
+
+# Clean up
+make clean
 ```
