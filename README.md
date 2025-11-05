@@ -1,4 +1,4 @@
-# Simplify Studio API Documentation
+# API Documentation
 
 API untuk chat assistant dengan dukungan memory management, PRD generation, dan multi-tool integration menggunakan LangGraph, FastAPI, dan Supabase.
 
