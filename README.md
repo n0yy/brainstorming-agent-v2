@@ -1,4 +1,4 @@
-# Brainstorming Agent v2
+# Documentation
 
 AI-powered chat assistant untuk brainstorming dan development tasks dengan dukungan memory management, PRD generation, code assistance, dan multi-tool integration menggunakan LangGraph, FastAPI, dan Supabase.
 
